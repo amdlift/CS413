@@ -466,7 +466,7 @@ trimLoop:
         cmp     r2, #10                 @ newline
         beq     trimCut
         cmp     r2, #13                 @ carriage return, in case the input
-        beq     trimCut                 @ came from a Windows file
+        beq     trimCut
 
         cmp     r2, #'a'
         blt     trimNext
