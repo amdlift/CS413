@@ -6,79 +6,67 @@
 @ Email:   amd0047@uah.edu
 @ Date:    November 6, 2026
 @
-@ Purpose: Simulates a single serve coffee machine like a Keurig.  The four
-@          buttons wired to the GPIO run the machine and the four LEDs show
-@          what it is doing.
+@ Purpose: Single serve coffee machine run from the four GPIO buttons, with
+@          the four LEDs showing status.
 @
 @              Button   Function              LED
 @              ------   --------              ---
 @              Red      power on and off      power
-@              Yellow   small coffee, 6 oz    on while it brews, 6 seconds
-@              Green    medium coffee, 8 oz   on while it brews, 8 seconds
-@              Blue     large coffee, 10 oz   on while it brews, 10 seconds
+@              Yellow   small coffee, 6 oz    on 6 seconds while brewing
+@              Green    medium coffee, 8 oz   on 8 seconds while brewing
+@              Blue     large coffee, 10 oz   on 10 seconds while brewing
 @
-@          The machine starts with a full 48 oz reservoir and the power off.
-@          Pressing red turns it on and lights the red LED.  Pressing red
-@          again turns the light off and stops the program.
+@          Starts with a full 48 oz reservoir and the power off.  Below 6 oz
+@          the machine prints a refill message, blinks red three times and
+@          stops.
 @
-@          If there is not enough water for the size that was picked the
-@          program says so and waits for a smaller size.  Once the water
-@          drops below 6 oz the machine cannot make even a small cup, so it
-@          prints a refill message, blinks the red LED three times and stops.
-@
-@          Pressing yellow and green at the same time shows how much water is
-@          left and how many cups of each size have been made.  No menu
-@          mentions it, which is what makes it the hidden code.
+@          Hidden code: yellow and green together report the water level and
+@          the cup counts.  No menu lists it.
 @
 @ Rev  Date         Purpose of change
 @ ---  ----         -----------------
-@  A   23-Oct-2026  Lab 4.  Added the wiringPi LED status, which is the only
-@                   change from Lab 3.
-@  B   06-Nov-2026  Lab 5.  The buttons took the place of the keyboard.  The
-@                   prompts and the hidden code changed with them and nothing
-@                   else did.
+@  A   23-Oct-2026  Lab 4.  Added the wiringPi LED status.
+@  B   06-Nov-2026  Lab 5.  Buttons replaced the keyboard.
 @
-@ The program reads and writes the GPIO, so it has to be run as root.  Either
-@ run "sudo su" first or put sudo in front of the program.
+@ Needs root for the GPIO.
 @
 @ Assemble: as -g -o davis.o davis.s
 @ Link:     gcc -o davis davis.o -lwiringPi
 @ Run:      sudo ./davis
 @=============================================================================
 
-@ Machine sizes.
+@ Machine sizes
         .equ    RESERVOIR_OZ, 48
         .equ    SMALL_OZ,      6
         .equ    MEDIUM_OZ,     8
         .equ    LARGE_OZ,     10
 
-@ wiringPi pin numbers for the LEDs.  These are wiringPi numbers, not the
-@ numbers printed on the Pi header.
+@ wiringPi LED pins
         .equ    RED,           5
         .equ    YELLOW,        4
         .equ    GREEN,         3
         .equ    BLUE,          2
 
-@ wiringPi pin numbers for the buttons, in the same color order.
+@ wiringPi button pins
         .equ    RED_BTN,       1
         .equ    YELLOW_BTN,    6
         .equ    GREEN_BTN,     0
         .equ    BLUE_BTN,      7
 
-@ Values wiringPi expects.
+@ wiringPi values
         .equ    OUTPUT,        1
         .equ    INPUT,         0
-        .equ    PUD_UP,        2        @ pull the button pins up so an open
-        .equ    ON,            1        @ switch reads HIGH
+        .equ    PUD_UP,        2
+        .equ    ON,            1
         .equ    OFF,           0
-        .equ    LOW,           0        @ a pressed button reads LOW
-        .equ    HIGH,          1
+        .equ    LOW,           0        @ pressed
+        .equ    HIGH,          1        @ not pressed
 
-@ Times in milliseconds.
+@ Times in milliseconds
         .equ    SMALL_MS,   6000
         .equ    MEDIUM_MS,  8000
         .equ    LARGE_MS,  10000
-        .equ    BLINK_MS,   5000        @ one half of an out of water blink
+        .equ    BLINK_MS,   5000        @ half of one blink
         .equ    BLINK_COUNT,   3
         .equ    DELAY_MS,    250        @ one pass of the button loop
 
@@ -87,20 +75,18 @@
 
 @=============================================================================
 @ main
-@
 @   r4  = oz of water left
 @   r5  = small cups made
 @   r6  = medium cups made
 @   r7  = large cups made
-@   r8  = what the red button read last pass
-@   r9  = what the yellow button read last pass
-@   r10 = what the green button read last pass
-@   r11 = what the blue button read last pass
+@   r8  = red button last pass
+@   r9  = yellow button last pass
+@   r10 = green button last pass
+@   r11 = blue button last pass
 @=============================================================================
 main:
         push    {r4-r12, lr}            @ 10 registers keeps sp 8 byte aligned
 
-@ Setup wiringPi
         bl      wiringPiSetup
         mvn     r1, #0                  @ -1
         cmp     r0, r1
@@ -110,7 +96,6 @@ main:
         bl      printf
         b       exitProgram
 
-@ Point four pins at the LEDs and four at the buttons.
 setupPins:
         mov     r0, #RED
         bl      initLed
@@ -130,12 +115,12 @@ setupPins:
         mov     r0, #BLUE_BTN
         bl      initButton
 
-        mov     r4, #RESERVOIR_OZ       @ reservoir starts full
+        mov     r4, #RESERVOIR_OZ
         mov     r5, #0
         mov     r6, #0
         mov     r7, #0
 
-        mov     r8,  #HIGH              @ nobody is touching a button yet
+        mov     r8,  #HIGH              @ no button is down yet
         mov     r9,  #HIGH
         mov     r10, #HIGH
         mov     r11, #HIGH
@@ -144,9 +129,7 @@ setupPins:
         bl      printf
 
 @-----------------------------------------------------------------------------
-@ powerLoop
-@ The machine is off, so the red button is the only one that does anything.
-@ One pass per polling interval.  The delay is what debounces the switch.
+@ powerLoop - machine off, only red does anything.  The delay debounces.
 @-----------------------------------------------------------------------------
 powerLoop:
         mov     r0, #DELAY_MS
@@ -154,15 +137,14 @@ powerLoop:
 
         mov     r0, #RED_BTN
         bl      digitalRead
-        cmp     r0, #HIGH               @ not pressed, go look again
+        cmp     r0, #HIGH               @ not pressed
         moveq   r8, r0
         beq     powerLoop
-        cmp     r8, #LOW                @ already down last pass, so this is
-        beq     powerLoop               @ not a new press
+        cmp     r8, #LOW                @ already down last pass
+        beq     powerLoop
         mov     r8, r0
 
-@ The red LED comes on with the machine and stays on until it stops.
-        mov     r0, #RED
+        mov     r0, #RED                @ power LED stays on until we stop
         mov     r1, #ON
         bl      digitalWrite
 
@@ -170,34 +152,31 @@ powerLoop:
         bl      printf
 
 @-----------------------------------------------------------------------------
-@ buttonLoop
-@ The machine is on.  Read the buttons once per pass and brew whatever size
-@ was pressed.
+@ buttonLoop - machine on.  Read the buttons once per pass.
 @-----------------------------------------------------------------------------
 buttonLoop:
         mov     r0, #DELAY_MS
         bl      delay
 
-@ The hidden code is yellow and green held down together, so the pair is read
-@ before either button on its own.  It only counts when at least one of them
-@ was up last pass, otherwise one long press would report over and over.
+@ Hidden code, read before the single buttons.  Only counts when one of the
+@ two was up last pass, or a long press would report every pass.
 readHidden:
         mov     r0, #YELLOW_BTN
         bl      digitalRead
         cmp     r0, #HIGH
-        beq     readRed                 @ yellow is up, so this is not the pair
+        beq     readRed
 
         mov     r0, #GREEN_BTN
         bl      digitalRead
         cmp     r0, #HIGH
-        beq     readRed                 @ green is up, so this is not the pair
+        beq     readRed
 
-        orr     r0, r9, r10             @ HIGH if either one was up last pass
+        orr     r0, r9, r10             @ HIGH if either was up last pass
         cmp     r0, #HIGH
         bne     readRed
 
-        mov     r9,  #LOW               @ write both of them down as seen so
-        mov     r10, #LOW               @ letting go does not brew a coffee
+        mov     r9,  #LOW               @ mark both seen so the release does
+        mov     r10, #LOW               @ not brew
         b       showStatus
 
 readRed:
@@ -244,13 +223,11 @@ readBlue:
         mov     r11, r0
 
 @-----------------------------------------------------------------------------
-@ smallCoffee, mediumCoffee, largeCoffee
-@ Take the water out of the reservoir, add one to the counter for that size
-@ and set up the LED that goes with it.
+@ One block per size.  Each sets up the LED and brew time for runBrew.
 @-----------------------------------------------------------------------------
 largeCoffee:
         cmp     r4, #LARGE_OZ
-        blt     notEnough               @ less water left than this cup needs
+        blt     notEnough
         sub     r4, r4, #LARGE_OZ
         add     r7, r7, #1
         mov     r0, #BLUE
@@ -274,8 +251,7 @@ mediumCoffee:
         mov     r0, #GREEN
         ldr     r1, =MEDIUM_MS
 
-@ The message comes after the brew so it shows up when the cup is really
-@ poured instead of while the LED is still lit.
+@ Message comes after the brew, not while the LED is still lit.
 runBrew:
         bl      brewLed
 
@@ -289,21 +265,14 @@ runBrew:
         bl      printf
         b       buttonLoop
 
-@ Not enough water for that size, so say how much is left and wait for a
-@ smaller one.
 notEnough:
         ldr     r0, =errWaterMsg
         mov     r1, r4
         bl      printf
         b       buttonLoop
 
-@ The hidden code report.  Printing it scrolls the menu off the screen, so
-@ the menu goes back up afterward.
-@
-@ printf only takes 3 values in r1 to r3 and each of these lines has its own
-@ label anyway, so it is easier to print one line at a time.  The counters are
-@ in r4 to r7, which printf has to leave alone, so they are still good between
-@ the calls.
+@ Hidden code report.  One printf per line since each has its own label.
+@ r4-r7 survive the calls, so the counters stay good.
 showStatus:
         ldr     r0, =waterMsg
         mov     r1, r4
@@ -318,13 +287,11 @@ showStatus:
         mov     r1, r7
         bl      printf
 
-        ldr     r0, =sizeMsg
+        ldr     r0, =sizeMsg            @ report scrolled the menu off
         bl      printf
         b       buttonLoop
 
-@ Not enough left for even a small cup, so a person has to refill it.  The
-@ red LED blinks on the way out so someone looking at the board instead of
-@ the screen can tell the machine quit on its own.
+@ Out of water.  Blink on the way out so the board shows it quit on its own.
 needRefill:
         ldr     r0, =refillMsg
         mov     r1, r4
@@ -332,8 +299,7 @@ needRefill:
         bl      blinkPowerOff
         b       exitProgram
 
-@ The red button was pressed a second time.  The light goes out with no
-@ blinking.
+@ Red pressed a second time.  No blinking.
 machineOff:
         ldr     r0, =offMsg
         bl      printf
@@ -352,14 +318,12 @@ exitProgram:
 @=============================================================================
 
 @-----------------------------------------------------------------------------
-@ initLed
-@ Points one pin at an LED and makes sure it starts off.
-@
-@   r0 = wiringPi pin number
+@ initLed - point a pin at an LED and start it off
+@   r0 = wiringPi pin
 @-----------------------------------------------------------------------------
 initLed:
         push    {r4, lr}                @ 2 registers keeps sp 8 byte aligned
-        mov     r4, r0                  @ pinMode is about to take r0
+        mov     r4, r0                  @ pinMode takes r0
 
         mov     r1, #OUTPUT
         bl      pinMode
@@ -371,11 +335,8 @@ initLed:
         pop     {r4, pc}
 
 @-----------------------------------------------------------------------------
-@ initButton
-@ Points one pin at a button.  The pull up resistor is what makes a button
-@ nobody is touching read HIGH, so a press is a LOW.
-@
-@   r0 = wiringPi pin number
+@ initButton - point a pin at a button.  Pull up makes an open switch HIGH.
+@   r0 = wiringPi pin
 @-----------------------------------------------------------------------------
 initButton:
         push    {r4, lr}                @ 2 registers keeps sp 8 byte aligned
@@ -391,16 +352,14 @@ initButton:
         pop     {r4, pc}
 
 @-----------------------------------------------------------------------------
-@ brewLed
-@ Lights one LED for a while and then turns it back off.
-@
-@   r0 = wiringPi pin number
-@   r1 = how many milliseconds to leave it on
+@ brewLed - light an LED, wait, turn it off
+@   r0 = wiringPi pin
+@   r1 = milliseconds
 @-----------------------------------------------------------------------------
 brewLed:
         push    {r4, r5, r6, lr}        @ 4 registers keeps sp 8 byte aligned
-        mov     r4, r0                  @ both arguments have to survive the
-        mov     r5, r1                  @ calls below
+        mov     r4, r0                  @ both args must survive the calls
+        mov     r5, r1
 
         mov     r1, #ON
         bl      digitalWrite
@@ -415,19 +374,14 @@ brewLed:
         pop     {r4, r5, r6, pc}
 
 @-----------------------------------------------------------------------------
-@ blinkPowerOff
-@ Blinks the red LED three times and leaves it off.  Only the out of water
-@ shutdown uses this.  The LED is already on when we get here, so each pass
-@ goes off first and then back on, and the last thing the subroutine does is
-@ turn it off for good.
-@
-@   r4 = blinks left to do
+@ blinkPowerOff - blink red three times, leave it off.  The LED is already on
+@ here, so each pass goes off then back on.
+@   r4 = blinks left
 @-----------------------------------------------------------------------------
 blinkPowerOff:
         push    {r4, lr}                @ 2 registers keeps sp 8 byte aligned
         mov     r4, #BLINK_COUNT
 
-@ One off and on pair per pass.
 blinkLoop:
         mov     r0, #RED
         mov     r1, #OFF
@@ -444,8 +398,7 @@ blinkLoop:
         subs    r4, r4, #1
         bne     blinkLoop
 
-@ Power is off now, so the light goes out and stays out.
-        mov     r0, #RED
+        mov     r0, #RED                @ power is off, so leave it off
         mov     r1, #OFF
         bl      digitalWrite
 
@@ -470,7 +423,7 @@ sizeMsg:
 
 dispensedMsg:   .asciz  "\nCoffee has been dispensed\n"
 
-@ The hidden code report.
+@ Hidden code report
 waterMsg:       .asciz  "\nWater level: %d\n"
 smallMsg:       .asciz  "Small: %d\n"
 mediumMsg:      .asciz  "Medium: %d\n"
@@ -482,14 +435,9 @@ refillMsg:      .asciz  "\nOnly %d oz of water remain, which is not enough for a
 
 offMsg:         .asciz  "\nTurning off the machine. Goodbye!\n\n"
 
-@ Run the program with sudo if this shows up.  wiringPi cannot open the GPIO
-@ without root.
 gpioErrMsg:     .asciz  "\nCould not set up the GPIO. Run this program as root.\n\n"
 
-@=============================================================================
-@ These come from wiringPi.  The program has to be linked with -lwiringPi for
-@ them to resolve.
-@=============================================================================
+@ From wiringPi, link with -lwiringPi
         .extern wiringPiSetup
         .extern pinMode
         .extern pullUpDnControl
