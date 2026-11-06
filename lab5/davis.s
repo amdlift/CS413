@@ -26,12 +26,17 @@
 @          drops below 6 oz the machine cannot make even a small cup, so it
 @          prints a refill message, blinks the red LED three times and stops.
 @
+@          Pressing yellow and green at the same time shows how much water is
+@          left and how many cups of each size have been made.  No menu
+@          mentions it, which is what makes it the hidden code.
+@
 @ Rev  Date         Purpose of change
 @ ---  ----         -----------------
 @  A   23-Oct-2026  Lab 4.  Added the wiringPi LED status, which is the only
 @                   change from Lab 3.
 @  B   06-Nov-2026  Lab 5.  The buttons took the place of the keyboard.  The
-@                   prompts changed with them and nothing else did.
+@                   prompts and the hidden code changed with them and nothing
+@                   else did.
 @
 @ The program reads and writes the GPIO, so it has to be run as root.  Either
 @ run "sudo su" first or put sudo in front of the program.
@@ -84,9 +89,9 @@
 @ main
 @
 @   r4  = oz of water left
-@   r5  = oz the cup being poured takes
-@   r6  = LED for that cup
-@   r7  = how long that cup brews
+@   r5  = small cups made
+@   r6  = medium cups made
+@   r7  = large cups made
 @   r8  = what the red button read last pass
 @   r9  = what the yellow button read last pass
 @   r10 = what the green button read last pass
@@ -126,6 +131,9 @@ setupPins:
         bl      initButton
 
         mov     r4, #RESERVOIR_OZ       @ reservoir starts full
+        mov     r5, #0
+        mov     r6, #0
+        mov     r7, #0
 
         mov     r8,  #HIGH              @ nobody is touching a button yet
         mov     r9,  #HIGH
@@ -163,12 +171,34 @@ powerLoop:
 
 @-----------------------------------------------------------------------------
 @ buttonLoop
-@ The machine is on.  Read all four buttons once per pass and brew whatever
-@ size was pressed.
+@ The machine is on.  Read the buttons once per pass and brew whatever size
+@ was pressed.
 @-----------------------------------------------------------------------------
 buttonLoop:
         mov     r0, #DELAY_MS
         bl      delay
+
+@ The hidden code is yellow and green held down together, so the pair is read
+@ before either button on its own.  It only counts when at least one of them
+@ was up last pass, otherwise one long press would report over and over.
+readHidden:
+        mov     r0, #YELLOW_BTN
+        bl      digitalRead
+        cmp     r0, #HIGH
+        beq     readRed                 @ yellow is up, so this is not the pair
+
+        mov     r0, #GREEN_BTN
+        bl      digitalRead
+        cmp     r0, #HIGH
+        beq     readRed                 @ green is up, so this is not the pair
+
+        orr     r0, r9, r10             @ HIGH if either one was up last pass
+        cmp     r0, #HIGH
+        bne     readRed
+
+        mov     r9,  #LOW               @ write both of them down as seen so
+        mov     r10, #LOW               @ letting go does not brew a coffee
+        b       showStatus
 
 readRed:
         mov     r0, #RED_BTN
@@ -212,54 +242,43 @@ readBlue:
         cmp     r11, #LOW
         beq     buttonLoop
         mov     r11, r0
-        b       largeCoffee
 
 @-----------------------------------------------------------------------------
 @ smallCoffee, mediumCoffee, largeCoffee
-@ Each one just says how big the cup is, which LED goes with it and how long
-@ it takes, then lets brewCup do the work.
+@ Take the water out of the reservoir, add one to the counter for that size
+@ and set up the LED that goes with it.
 @-----------------------------------------------------------------------------
+largeCoffee:
+        cmp     r4, #LARGE_OZ
+        blt     notEnough               @ less water left than this cup needs
+        sub     r4, r4, #LARGE_OZ
+        add     r7, r7, #1
+        mov     r0, #BLUE
+        ldr     r1, =LARGE_MS
+        b       runBrew
+
 smallCoffee:
-        mov     r5, #SMALL_OZ
-        mov     r6, #YELLOW
-        ldr     r7, =SMALL_MS
-        b       brewCup
+        cmp     r4, #SMALL_OZ
+        blt     notEnough
+        sub     r4, r4, #SMALL_OZ
+        add     r5, r5, #1
+        mov     r0, #YELLOW
+        ldr     r1, =SMALL_MS
+        b       runBrew
 
 mediumCoffee:
-        mov     r5, #MEDIUM_OZ
-        mov     r6, #GREEN
-        ldr     r7, =MEDIUM_MS
-        b       brewCup
-
-largeCoffee:
-        mov     r5, #LARGE_OZ
-        mov     r6, #BLUE
-        ldr     r7, =LARGE_MS
-
-@-----------------------------------------------------------------------------
-@ brewCup
-@ Pours one cup.  The LED for that size stays on for as long as the cup takes
-@ to brew, so the board shows what is being made.
-@-----------------------------------------------------------------------------
-brewCup:
-        cmp     r4, r5
-        blt     notEnough               @ less water left than this cup needs
-
-        sub     r4, r4, r5
-
-        mov     r0, r6
-        mov     r1, #ON
-        bl      digitalWrite
-
-        mov     r0, r7
-        bl      delay
-
-        mov     r0, r6
-        mov     r1, #OFF
-        bl      digitalWrite
+        cmp     r4, #MEDIUM_OZ
+        blt     notEnough
+        sub     r4, r4, #MEDIUM_OZ
+        add     r6, r6, #1
+        mov     r0, #GREEN
+        ldr     r1, =MEDIUM_MS
 
 @ The message comes after the brew so it shows up when the cup is really
 @ poured instead of while the LED is still lit.
+runBrew:
+        bl      brewLed
+
         ldr     r0, =dispensedMsg
         bl      printf
 
@@ -275,6 +294,31 @@ brewCup:
 notEnough:
         ldr     r0, =errWaterMsg
         mov     r1, r4
+        bl      printf
+        b       buttonLoop
+
+@ The hidden code report.  Printing it scrolls the menu off the screen, so
+@ the menu goes back up afterward.
+@
+@ printf only takes 3 values in r1 to r3 and each of these lines has its own
+@ label anyway, so it is easier to print one line at a time.  The counters are
+@ in r4 to r7, which printf has to leave alone, so they are still good between
+@ the calls.
+showStatus:
+        ldr     r0, =waterMsg
+        mov     r1, r4
+        bl      printf
+        ldr     r0, =smallMsg
+        mov     r1, r5
+        bl      printf
+        ldr     r0, =mediumMsg
+        mov     r1, r6
+        bl      printf
+        ldr     r0, =largeMsg
+        mov     r1, r7
+        bl      printf
+
+        ldr     r0, =sizeMsg
         bl      printf
         b       buttonLoop
 
@@ -347,6 +391,30 @@ initButton:
         pop     {r4, pc}
 
 @-----------------------------------------------------------------------------
+@ brewLed
+@ Lights one LED for a while and then turns it back off.
+@
+@   r0 = wiringPi pin number
+@   r1 = how many milliseconds to leave it on
+@-----------------------------------------------------------------------------
+brewLed:
+        push    {r4, r5, r6, lr}        @ 4 registers keeps sp 8 byte aligned
+        mov     r4, r0                  @ both arguments have to survive the
+        mov     r5, r1                  @ calls below
+
+        mov     r1, #ON
+        bl      digitalWrite
+
+        mov     r0, r5
+        bl      delay
+
+        mov     r0, r4
+        mov     r1, #OFF
+        bl      digitalWrite
+
+        pop     {r4, r5, r6, pc}
+
+@-----------------------------------------------------------------------------
 @ blinkPowerOff
 @ Blinks the red LED three times and leaves it off.  Only the out of water
 @ shutdown uses this.  The LED is already on when we get here, so each pass
@@ -401,6 +469,12 @@ sizeMsg:
         .asciz  "  RED     Turn the machine off\n"
 
 dispensedMsg:   .asciz  "\nCoffee has been dispensed\n"
+
+@ The hidden code report.
+waterMsg:       .asciz  "\nWater level: %d\n"
+smallMsg:       .asciz  "Small: %d\n"
+mediumMsg:      .asciz  "Medium: %d\n"
+largeMsg:       .asciz  "Large: %d\n"
 
 errWaterMsg:    .asciz  "\nThere is not enough water for that size. Only %d oz remain.\nPlease select a smaller cup size.\n"
 
